@@ -11,6 +11,7 @@ A **production-ready** Spring Boot 3.x REST API demonstrating a complete CRUD ap
 - [Project Structure](#project-structure)
 - [API Endpoints](#api-endpoints)
 - [Quick Start](#quick-start)
+- [Running Without Kubernetes](#running-without-kubernetes)
 - [Environments](#environments)
 - [Documentation](#documentation)
 
@@ -183,6 +184,119 @@ curl http://localhost:8080/actuator/health
 # Open Swagger UI
 open http://localhost:8080/swagger-ui.html
 ```
+
+---
+
+## Running Without Kubernetes
+
+You do not need Kubernetes to run this project. Two simpler options are available depending on your setup.
+
+### Option 1: Maven Only (fastest for local dev)
+
+Requires only Java 17+ and a running PostgreSQL instance.
+
+**Step 1 — Start PostgreSQL via Docker (one-liner):**
+
+```bash
+docker run -d --name postgres-dev \
+  -e POSTGRES_DB=products_dev \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  postgres:16-alpine
+```
+
+**Step 2 — Run the application:**
+
+```bash
+# Windows (PowerShell)
+$env:SPRING_PROFILES_ACTIVE="dev"
+./mvnw spring-boot:run
+
+# Linux / macOS
+SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
+```
+
+**Step 3 — Verify:**
+
+```bash
+curl http://localhost:8080/actuator/health
+# Browser: http://localhost:8080/swagger-ui.html
+```
+
+**Step 4 — Stop:**
+
+```bash
+# Ctrl+C to stop the app, then:
+docker stop postgres-dev && docker rm postgres-dev
+```
+
+---
+
+### Option 2: Docker Compose (recommended without K8s)
+
+Requires only Docker & Docker Compose. No Java, no Maven, no PostgreSQL installation needed.
+
+#### DEV
+
+```bash
+docker compose up -d
+
+# Follow logs
+docker compose logs -f app
+
+# Verify
+curl http://localhost:8080/actuator/health
+
+# Open Swagger UI → http://localhost:8080/swagger-ui.html
+
+# Stop (preserves DB data)
+docker compose down
+
+# Stop and wipe all data
+docker compose down -v
+```
+
+#### TEST
+
+```bash
+docker compose -f docker-compose.test.yml up -d
+
+curl http://localhost:8081/actuator/health
+
+docker compose -f docker-compose.test.yml down -v
+```
+
+#### PROD (single-server, no K8s)
+
+```bash
+# Create a .env.prod file with real credentials (never commit this file)
+cat > .env.prod <<'EOF'
+POSTGRES_DB=products_prod
+POSTGRES_USER=prod_user
+POSTGRES_PASSWORD=YourStrongPassword!
+IMAGE_NAME=registry.gitlab.com/your-namespace/spring-docker-k8s-demo
+IMAGE_TAG=1.0.0
+EOF
+
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+curl http://localhost:8080/actuator/health
+```
+
+---
+
+### Quick Comparison — Which Option to Choose?
+
+| Situation | Recommended Approach |
+|-----------|---------------------|
+| Writing & testing code locally | Maven only (`./mvnw spring-boot:run`) |
+| Sharing a running environment with teammates | Docker Compose (`docker compose up -d`) |
+| Running all environments on a single server | Docker Compose (`docker-compose.prod.yml`) |
+| Multi-server, auto-scaling, high availability | Kubernetes (see [docs/KUBERNETES.md](docs/KUBERNETES.md)) |
+| CI/CD automated deploys | GitLab pipeline (see [docs/GITLAB-CICD.md](docs/GITLAB-CICD.md)) |
+
+> For full step-by-step instructions for every method and environment, see [docs/HOW-TO-RUN.md](docs/HOW-TO-RUN.md).
 
 ---
 

@@ -1,0 +1,10 @@
+.git
+.gitignore
+.gitattributes
+target/
+!target/*.jar
+*.md
+docs/
+k8s/
+.gitlab-ci.yml
+.mvn/wrapper/maven-wrapper.jar

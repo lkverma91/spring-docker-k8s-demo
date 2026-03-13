@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: products-app
+data:
+  SPRING_PROFILES_ACTIVE: "dev"
+  POSTGRES_DB: "products_dev"
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres-service:5432/products_dev"

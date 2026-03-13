@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: products-app-test
+
+namePrefix: test-
+
+resources:
+  - ../../base
+  - configmap.yml
+  - secret.yml
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: registry.gitlab.com/your-namespace/spring-docker-k8s-demo:test
+    target:
+      kind: Deployment
+      name: products-app
+
+  - patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: api-test.example.com
+    target:
+      kind: Ingress
+      name: products-app-ingress
+
+commonLabels:
+  environment: test

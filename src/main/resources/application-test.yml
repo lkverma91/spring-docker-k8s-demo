@@ -1,0 +1,31 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/products_test
+    username: postgres
+    password: postgres
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+logging:
+  level:
+    com.example.springdockerk8sdemo: INFO
+    org.hibernate.SQL: WARN
+    org.springframework.web: INFO
+
+server:
+  port: 8081
+
+management:
+  endpoint:
+    health:
+      show-details: when-authorized

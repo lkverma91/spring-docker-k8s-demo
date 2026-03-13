@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: products-app-prod
+
+namePrefix: prod-
+
+resources:
+  - ../../base
+  - configmap.yml
+  - secret.yml
+  - hpa.yml
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: registry.gitlab.com/your-namespace/spring-docker-k8s-demo:latest
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "512Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1500m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "1.5Gi"
+    target:
+      kind: Deployment
+      name: products-app
+
+  - patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: api.example.com
+      - op: add
+        path: /metadata/annotations
+        value:
+          nginx.ingress.kubernetes.io/ssl-redirect: "true"
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+      - op: add
+        path: /spec/tls
+        value:
+          - hosts:
+              - api.example.com
+            secretName: products-app-tls
+    target:
+      kind: Ingress
+      name: products-app-ingress
+
+  - patch: |-
+      - op: replace
+        path: /spec/resources/requests/storage
+        value: "20Gi"
+    target:
+      kind: PersistentVolumeClaim
+      name: postgres-pvc
+
+commonLabels:
+  environment: prod

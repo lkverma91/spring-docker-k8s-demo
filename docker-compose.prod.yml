@@ -1,0 +1,73 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# PROD environment — docker-compose.prod.yml
+# Usage: docker compose -f docker-compose.prod.yml up -d
+# IMPORTANT: Set all env vars via a .env.prod file or CI/CD secrets.
+# Never commit production credentials to version control.
+# ──────────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: products-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-products_prod}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-products_prod}"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - prod-network
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  app:
+    image: ${IMAGE_NAME:-spring-docker-k8s-demo}:${IMAGE_TAG:-latest}
+    container_name: products-app-prod
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-products_prod}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health/liveness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: start-first
+
+volumes:
+  postgres_prod_data:
+    name: products_postgres_prod
+
+networks:
+  prod-network:
+    name: products-network-prod

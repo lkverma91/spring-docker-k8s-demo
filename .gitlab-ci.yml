@@ -1,0 +1,247 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# GitLab CI/CD Pipeline
+# Project: spring-docker-k8s-demo
+#
+# Pipeline Stages:
+#   1. validate  → Compile and check code quality
+#   2. test      → Run unit + integration tests
+#   3. build     → Build production Docker image
+#   4. publish   → Push image to GitLab Container Registry
+#   5. deploy-dev   → Deploy to DEV Kubernetes cluster (auto on main)
+#   6. deploy-test  → Deploy to TEST Kubernetes cluster (auto on main)
+#   7. deploy-prod  → Deploy to PROD Kubernetes cluster (manual gate)
+# ──────────────────────────────────────────────────────────────────────────────
+
+image: eclipse-temurin:17-jdk-alpine
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository -Dmaven.multiModuleProjectDirectory=$CI_PROJECT_DIR"
+  MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end -T 1C"
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+  DOCKER_TLS_CERTDIR: "/certs"
+  DOCKER_DRIVER: overlay2
+  KUBE_CONFIG_DEV: $KUBE_CONFIG_DEV         # GitLab CI/CD variable
+  KUBE_CONFIG_TEST: $KUBE_CONFIG_TEST       # GitLab CI/CD variable
+  KUBE_CONFIG_PROD: $KUBE_CONFIG_PROD       # GitLab CI/CD variable
+
+# ── Cache Maven dependencies ──────────────────────────────────────────────────
+cache:
+  key:
+    files:
+      - pom.xml
+  paths:
+    - .m2/repository
+  policy: pull-push
+
+stages:
+  - validate
+  - test
+  - build
+  - publish
+  - deploy-dev
+  - deploy-test
+  - deploy-prod
+
+# ── STAGE 1: Validate ─────────────────────────────────────────────────────────
+compile:
+  stage: validate
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS compile
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+checkstyle:
+  stage: validate
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# ── STAGE 2: Test ─────────────────────────────────────────────────────────────
+unit-tests:
+  stage: test
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+      variables:
+        POSTGRES_DB: products_test
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+  variables:
+    SPRING_PROFILES_ACTIVE: test
+    SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/products_test
+    SPRING_DATASOURCE_USERNAME: postgres
+    SPRING_DATASOURCE_PASSWORD: postgres
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS test -Dtest="**/*Test" -DfailIfNoTests=false
+  artifacts:
+    when: always
+    reports:
+      junit: target/surefire-reports/TEST-*.xml
+    paths:
+      - target/surefire-reports/
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+integration-tests:
+  stage: test
+  # Testcontainers spins up its own PostgreSQL — needs Docker socket
+  image: eclipse-temurin:17-jdk
+  services:
+    - name: docker:24-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: "/certs/client"
+    TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
+  script:
+    - ./mvnw $MAVEN_CLI_OPTS verify -Dtest="**/*IntegrationTest" -DfailIfNoTests=false
+  artifacts:
+    when: always
+    reports:
+      junit: target/failsafe-reports/TEST-*.xml
+    paths:
+      - target/failsafe-reports/
+    expire_in: 7 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+  allow_failure: false
+
+# ── STAGE 3: Build Docker Image ───────────────────────────────────────────────
+build-image:
+  stage: build
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - |
+      # Determine the image tag based on branch
+      if [ "$CI_COMMIT_BRANCH" == "main" ]; then
+        TAG="latest"
+      elif [ "$CI_COMMIT_BRANCH" == "develop" ]; then
+        TAG="dev"
+      else
+        TAG="${CI_COMMIT_REF_SLUG}"
+      fi
+    - docker build --pull --cache-from $IMAGE_NAME:$TAG -t $IMAGE_NAME:$TAG -t $IMAGE_NAME:$CI_COMMIT_SHA .
+    - echo "IMAGE_TAG=$TAG" >> build.env
+    - echo "IMAGE_SHA=$CI_COMMIT_SHA" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+# ── STAGE 4: Publish to Registry ─────────────────────────────────────────────
+publish-image:
+  stage: publish
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  needs:
+    - job: build-image
+      artifacts: true
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker pull $IMAGE_NAME:$IMAGE_SHA
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - docker push $IMAGE_NAME:$IMAGE_SHA
+    - echo "Published $IMAGE_NAME:$IMAGE_TAG and $IMAGE_NAME:$IMAGE_SHA"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+# ── STAGE 5: Deploy to DEV ────────────────────────────────────────────────────
+deploy-dev:
+  stage: deploy-dev
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  needs:
+    - job: publish-image
+  environment:
+    name: development
+    url: https://api-dev.example.com
+  before_script:
+    - mkdir -p ~/.kube
+    - echo "$KUBE_CONFIG_DEV" | base64 -d > ~/.kube/config
+    - kubectl version --client
+  script:
+    - kubectl apply -k k8s/overlays/dev/
+    - |
+      kubectl rollout status deployment/dev-products-app \
+        -n products-app-dev \
+        --timeout=300s
+    - echo "Deployed to DEV environment successfully"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+
+# ── STAGE 6: Deploy to TEST ───────────────────────────────────────────────────
+deploy-test:
+  stage: deploy-test
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  needs:
+    - job: deploy-dev
+  environment:
+    name: test
+    url: https://api-test.example.com
+  before_script:
+    - mkdir -p ~/.kube
+    - echo "$KUBE_CONFIG_TEST" | base64 -d > ~/.kube/config
+  script:
+    - |
+      # Update the image tag in test overlay
+      cd k8s/overlays/test
+      kubectl apply -k .
+    - |
+      kubectl rollout status deployment/test-products-app \
+        -n products-app-test \
+        --timeout=300s
+    - echo "Deployed to TEST environment successfully"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: on_success
+
+# ── STAGE 7: Deploy to PROD (Manual Gate) ─────────────────────────────────────
+deploy-prod:
+  stage: deploy-prod
+  image:
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  needs:
+    - job: deploy-test
+  environment:
+    name: production
+    url: https://api.example.com
+  before_script:
+    - mkdir -p ~/.kube
+    - echo "$KUBE_CONFIG_PROD" | base64 -d > ~/.kube/config
+  script:
+    - kubectl apply -k k8s/overlays/prod/
+    - |
+      kubectl rollout status deployment/prod-products-app \
+        -n products-app-prod \
+        --timeout=600s
+    - echo "Deployed to PRODUCTION environment successfully"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual          # Requires human approval in GitLab UI
+  allow_failure: false

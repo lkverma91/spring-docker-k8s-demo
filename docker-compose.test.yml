@@ -1,0 +1,59 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# TEST environment — docker-compose.test.yml
+# Usage: docker compose -f docker-compose.test.yml up --abort-on-container-exit
+# ──────────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: products-postgres-test
+    restart: "no"
+    environment:
+      POSTGRES_DB: products_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d products_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - test-network
+
+  app-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: products-app-test
+    restart: "no"
+    environment:
+      SPRING_PROFILES_ACTIVE: test
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-test:5432/products_test
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  postgres_test_data:
+    name: products_postgres_test
+
+networks:
+  test-network:
+    name: products-network-test

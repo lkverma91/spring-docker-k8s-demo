@@ -316,7 +316,8 @@ See [docs/HOW-TO-RUN.md](docs/HOW-TO-RUN.md) for detailed instructions for each 
 
 | Document | Description |
 |----------|-------------|
+| [docs/RUNNING.md](docs/RUNNING.md) | **Start here** — pre-flight checks + step-by-step run guide for backend & frontend |
 | [docs/DOCKER.md](docs/DOCKER.md) | How Docker is set up, multi-stage build, compose files |
 | [docs/KUBERNETES.md](docs/KUBERNETES.md) | K8s architecture, Kustomize overlays, secrets management |
 | [docs/GITLAB-CICD.md](docs/GITLAB-CICD.md) | CI/CD pipeline stages, variables, approvals |
-| [docs/HOW-TO-RUN.md](docs/HOW-TO-RUN.md) | Step-by-step guide to run in DEV, TEST, and PROD |
+| [docs/HOW-TO-RUN.md](docs/HOW-TO-RUN.md) | Step-by-step guide to run in DEV, TEST, and PROD environments |
